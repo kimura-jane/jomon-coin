@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1" />
 <title>JOMON COIN | Claim & Tools</title>
 <style>
-  :root { --bg:#0b0d10; --fg:#e9eef2; --muted:#9aa7b1; --acc:#7bd389; }
+  :root { --bg:#0b0d10; --fg:#e9eef2; --muted:#9aa7b1; --acc:#7bd389; --err:#ff7b7b; --warn:#f5c451;}
   html,body { margin:0; font-family:system-ui,-apple-system,Segoe UI,Roboto; background:var(--bg); color:var(--fg); }
   header { padding:18px 16px; display:flex; align-items:center; gap:12px; border-bottom:1px solid #1a1f24;}
   header img { width:36px; height:36px; border-radius:8px; background:#fff0; }
@@ -20,10 +20,11 @@
   input { background:#0d1115; min-width:280px; }
   .muted { color:var(--muted); font-size:13px; }
   .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
-  .ok { color:#7bd389; } .warn{ color:#f5c451;} .err{ color:#ff7b7b;}
+  .ok { color:#7bd389; } .warn{ color:var(--warn);} .err{ color:var(--err);}
   .grid { display:grid; gap:12px; }
   footer { padding:28px 16px; color:var(--muted); font-size:12px; text-align:center;}
   code { background:#0b0f12; padding:2px 6px; border-radius:6px; border:1px solid #1a1f24;}
+  a { color:#8bd9ff; text-decoration:none } a:hover{text-decoration:underline}
 </style>
 <script src="https://cdn.jsdelivr.net/npm/ethers@6.13.2/dist/ethers.min.js"></script>
 </head>
@@ -34,21 +35,16 @@
 </header>
 
 <main>
-  <!-- 0) 設定 -->
-  <div class="card grid">
-    <div class="row">
-      <div>ネットワーク: <b>Polygon PoS</b> <span class="muted">(ChainID 137)</span></div>
-    </div>
-    <div class="row">
-      <div>トークン: <span id="tokenAddr" class="mono">0xYOUR_TOKEN_ADDRESS</span></div>
-    </div>
-    <div class="row">
-      <div>ディストリビュータ: <span id="distAddr" class="mono">0xYOUR_DISTRIBUTOR_ADDRESS</span></div>
-    </div>
-    <div class="muted">※上の2つをてめーの実アドレスに差し替えろ。配布前はディストリビュータは空欄でも可。</div>
+  <!-- 0) 設定表示 -->
+  <div class="card grid" id="cfg">
+    <div>ネットワーク: <b>Polygon PoS</b> <span class="muted">(ChainID 137)</span></div>
+    <div>オーナー: <span id="ownerAddr" class="mono"></span></div>
+    <div>トークン: <span id="tokenAddr"></span></div>
+    <div id="distRow">ディストリビュータ: <span id="distAddr"></span></div>
+    <div class="muted">※ トークンは <code>0x…(42文字)</code> の<strong>コントラクトアドレス</strong>を入れろ。ウォレットとは別物。</div>
   </div>
 
-  <!-- 1) 接続＆ネットワーク整合 -->
+  <!-- 1) 接続＆ネットワーク -->
   <div class="card grid">
     <div class="row">
       <button id="connectBtn" class="primary">① ウォレット接続</button>
@@ -60,23 +56,23 @@
     <div id="balance" class="muted"></div>
   </div>
 
-  <!-- 2) MetaMaskへJOMONを追加（ロゴ付き） -->
+  <!-- 2) MetaMaskへJOMON追加 -->
   <div class="card grid">
     <div>MetaMaskにJOMONを追加（ロゴ表示つき）</div>
     <div class="row">
       <button id="watchBtn">MetaMaskに追加</button>
-      <div class="muted">ロゴ: <code>./jomon-coin-logo-256.png</code>（256×256 PNG）</div>
+      <div class="muted">ロゴ: <code>https://kimura-jane.github.io/jomon-coin-logo-256.png</code>（256×256 PNG）</div>
     </div>
   </div>
 
-  <!-- 3) Claim（配布開始時に有効化） -->
-  <div class="card grid">
+  <!-- 3) Claim（配布開始時だけ表示） -->
+  <div class="card grid" id="claimCard">
     <div class="row">
       <button id="loadBtn">配布データ読込</button>
       <button id="claimBtn" disabled class="primary">Claim 実行</button>
       <div id="claimStat" class="muted"></div>
     </div>
-    <div class="muted">`claims.json` を同じフォルダに置け。スキーマは下記。</div>
+    <div class="muted">同フォルダに <code>claims.json</code> を置く（スキーマは下記）。</div>
     <pre class="muted" style="white-space:pre-wrap;word-break:break-word;">
 {
   "chainId": 137,
@@ -89,14 +85,14 @@
     </pre>
   </div>
 
-  <!-- 4) 本人によるアドレス移行 -->
+  <!-- 4) 本人移行 -->
   <div class="card grid">
     <div>本人移行（migrate）</div>
     <div class="row">
-      <input id="newAddr" placeholder="新アドレス (0x...)" />
+      <input id="newAddr" placeholder="新アドレス (0x…)" />
       <button id="migrateBtn">migrate 実行</button>
     </div>
-    <div class="muted">旧アドレス＝現在接続中のアドレス。残高全量を burn → 新アドレスへ mint（同一Tx）。</div>
+    <div class="muted">接続中アドレスの残高を <code>burn → new</code> に同量 <code>mint</code>。転送禁止の例外。</div>
     <div id="migStat" class="muted"></div>
   </div>
 </main>
@@ -105,12 +101,13 @@
 
 <script>
 (async function(){
-  // ======= 設定（差し替え） =======
-  const TOKEN_ADDRESS = 0x8242dAe5C6fF90b03d15C54Cad95C3ed97AC0571;          // ←差し替え
-  const DISTRIBUTOR_ADDRESS = "0xYOUR_DISTRIBUTOR_ADDRESS"; // ←配布開始時に差し替え
+  // ======= てめーの設定 =======
+  const OWNER_ADDRESS = "0x8242dAe5C6fF90b03d15C54Cad95C3ed97AC0571"; // ← てめーのウォレット
+  const TOKEN_ADDRESS = "";                   // ← コントラクトを出したら 0x… に差し替え
+  const DISTRIBUTOR_ADDRESS = "";             // ← 配布開始時に 0x… を入れる
   const TOKEN_SYMBOL = "JOMON";
   const TOKEN_DECIMALS = 0;
-  const TOKEN_IMAGE = "./jomon-coin-logo-256.png";
+  const TOKEN_IMAGE = "https://kimura-jane.github.io/jomon-coin-logo-256.png";
   const POLYGON = { chainId: "0x89", chainName: "Polygon PoS",
     nativeCurrency: { name: "POL", symbol: "POL", decimals: 18 },
     rpcUrls: ["https://polygon-rpc.com"],
@@ -123,9 +120,8 @@
     "function symbol() view returns (string)",
     "function decimals() view returns (uint8)",
     "function balanceOf(address) view returns (uint256)",
-    "function migrate(address newAddr) external",        // 準ソウルバウンド
+    "function migrate(address newAddr) external"
   ];
-  // Distributorは msg.sender 前提の簡易版（実装に合わせて関数名を変えろ）
   const DIST_ABI = [
     "function isClaimed(address) view returns (bool)",
     "function claim(uint256 amount, bytes32[] calldata proof) external"
@@ -136,10 +132,26 @@
   const connectBtn = $("connectBtn"), switchBtn=$("switchBtn"),
         balanceBtn=$("balanceBtn"), acctEl=$("acct"), netStatus=$("netStatus"), balEl=$("balance");
   const watchBtn=$("watchBtn");
-  const loadBtn=$("loadBtn"), claimBtn=$("claimBtn"), claimStat=$("claimStat");
+  const loadBtn=$("loadBtn"), claimBtn=$("claimBtn"), claimStat=$("claimStat"), claimCard=$("claimCard");
   const migrateBtn=$("migrateBtn"), newAddr=$("newAddr"), migStat=$("migStat");
-  $("tokenAddr").textContent = TOKEN_ADDRESS;
-  $("distAddr").textContent = DISTRIBUTOR_ADDRESS;
+
+  // 表示整形
+  const isAddr = (v)=>/^0x[a-fA-F0-9]{40}$/.test(v);
+  $("ownerAddr").innerHTML = `<a class="mono" href="https://polygonscan.com/address/${OWNER_ADDRESS}" target="_blank" rel="noopener">${OWNER_ADDRESS}</a>`;
+
+  if (isAddr(TOKEN_ADDRESS)) {
+    $("tokenAddr").innerHTML = `<a class="mono" href="https://polygonscan.com/address/${TOKEN_ADDRESS}" target="_blank" rel="noopener">${TOKEN_ADDRESS}</a>`;
+  } else {
+    $("tokenAddr").innerHTML = `<span class="err">未設定（トークンの0x…を入れろ）</span>`;
+  }
+
+  if (isAddr(DISTRIBUTOR_ADDRESS)) {
+    $("distAddr").innerHTML = `<a class="mono" href="https://polygonscan.com/address/${DISTRIBUTOR_ADDRESS}" target="_blank" rel="noopener">${DISTRIBUTOR_ADDRESS}</a>`;
+  } else {
+    $("distAddr").innerHTML = `<span class="warn">未設定（配布前は空でOK）</span>`;
+    // 配布しない間はUIごと隠す
+    claimCard?.remove();
+  }
 
   // ======= Provider/Signer =======
   let provider, signer, account;
@@ -161,14 +173,19 @@
     const isPoly = net.chainId === 137n;
     netStatus.innerHTML = isPoly ? `<span class="ok">Polygon(137)</span>` :
       `<span class="warn">別ネット: chainId=${net.chainId}</span>`;
-    claimBtn.disabled = !isPoly;
+    // トークン未設定なら関連ボタンをロック
+    const tokenSet = isAddr(TOKEN_ADDRESS);
+    watchBtn.disabled = !tokenSet;
+    balanceBtn.disabled = !tokenSet;
+    migrateBtn.disabled = !tokenSet;
+    claimBtn.disabled = !isPoly || !isAddr(DISTRIBUTOR_ADDRESS);
   }
+
   async function switchToPolygon(){
     await ensureProvider();
     try {
       await window.ethereum.request({ method:"wallet_switchEthereumChain", params:[{ chainId: POLYGON.chainId }]});
     } catch(e){
-      // 未登録なら追加
       if (e.code === 4902) {
         await window.ethereum.request({ method:"wallet_addEthereumChain", params:[POLYGON]});
       } else { throw e; }
@@ -179,6 +196,7 @@
   // ======= 残高表示 =======
   async function showBalance(){
     if(!signer) return;
+    if(!isAddr(TOKEN_ADDRESS)) { balEl.innerHTML = `<span class="err">トークン未設定</span>`; return; }
     const token = new ethers.Contract(TOKEN_ADDRESS, ERC20_MIN_ABI, provider);
     const bal = await token.balanceOf(account);
     balEl.innerHTML = `JOMON 残高: <b>${bal.toString()}</b> 枚`;
@@ -187,6 +205,7 @@
   // ======= MetaMaskにトークン追加 =======
   async function watchAsset(){
     if(!window.ethereum) return alert("ウォレットが無い");
+    if(!isAddr(TOKEN_ADDRESS)) return alert("トークン未設定。0x…を入れてから押せ");
     const ok = await window.ethereum.request({
       method: "wallet_watchAsset",
       params: {
@@ -202,7 +221,7 @@
     if (!ok) alert("追加がキャンセルされた");
   }
 
-  // ======= Claimロード＆実行 =======
+  // ======= Claim =======
   let claimData=null, myEntry=null;
   async function loadClaims(){
     try{
@@ -210,10 +229,11 @@
       if(!res.ok) throw new Error("claims.jsonが見つからん");
       claimData = await res.json();
       if (claimData.chainId !== 137) throw new Error("chainIdが137じゃない");
-      if (ethers.getAddress(claimData.token) !== ethers.getAddress(TOKEN_ADDRESS))
+      if (!isAddr(TOKEN_ADDRESS) || ethers.getAddress(claimData.token) !== ethers.getAddress(TOKEN_ADDRESS))
         throw new Error("claims.jsonのtokenアドレス不一致");
-      myEntry = claimData.claims?.[account?.toLowerCase()];
-      if(!myEntry) { claimStat.innerHTML = `<span class="warn">いまは対象外 or 配布前</span>`; claimBtn.disabled = true; return; }
+      const adr = account?.toLowerCase();
+      myEntry = claimData.claims?.[adr];
+      if(!myEntry) { claimStat.innerHTML = `<span class="warn">対象外 or 配布前</span>`; claimBtn.disabled = true; return; }
       claimStat.innerHTML = `amount=${myEntry.amount} / proof(${myEntry.proof.length})`;
       claimBtn.disabled = false;
     }catch(e){
@@ -224,7 +244,7 @@
   async function doClaim(){
     try{
       const distAddr = claimData?.distributor || DISTRIBUTOR_ADDRESS;
-      if(!distAddr) throw new Error("ディストリビュータアドレス未設定");
+      if(!isAddr(distAddr)) throw new Error("ディストリビュータ未設定");
       const dist = new ethers.Contract(distAddr, DIST_ABI, signer);
       const claimed = await dist.isClaimed(account);
       if (claimed) { claimStat.innerHTML = `<span class="warn">すでに受取済み</span>`; return; }
@@ -241,6 +261,7 @@
   // ======= migrate =======
   async function doMigrate(){
     try{
+      if(!isAddr(TOKEN_ADDRESS)) throw new Error("トークン未設定");
       if(!ethers.isAddress(newAddr.value)) throw new Error("新アドレスが不正");
       const token = new ethers.Contract(TOKEN_ADDRESS, ERC20_MIN_ABI, signer);
       const tx = await token.migrate(ethers.getAddress(newAddr.value));
@@ -253,6 +274,7 @@
   }
 
   // ======= Bind =======
+  const providerMaybe = window.ethereum ? new ethers.BrowserProvider(window.ethereum) : null;
   connectBtn.onclick = connect;
   switchBtn.onclick = switchToPolygon;
   balanceBtn.onclick = showBalance;
@@ -261,9 +283,8 @@
   claimBtn.onclick = doClaim;
   migrateBtn.onclick = doMigrate;
 
-  // オート：ウォレットがあればネットワーク状態だけ表示
-  if (window.ethereum){
-    await ensureProvider();
+  if (providerMaybe){
+    provider = providerMaybe;
     window.ethereum.on('accountsChanged', ()=>location.reload());
     window.ethereum.on('chainChanged', ()=>location.reload());
     checkNetwork().catch(()=>{});
